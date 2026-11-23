@@ -40,7 +40,7 @@ const cell=(a,r,k)=>{const v=(a[r]||[])[k];return v===undefined?"":v};
 async function api(path,opt={}){
  const r=await fetch(API+path,{...opt,headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"}});
  if(r.status===401){token=null;login("Tu sesión caducó. Inicia sesión de nuevo.");throw new Error("Sesión caducada")}
- if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error&&j.error.message||("HTTP "+r.status))}
+ if(!r.ok){const t=await r.text().catch(()=>"");let m="";try{const j=JSON.parse(t);m=j.error&&j.error.message||""}catch(e){m=t.slice(0,200)}throw new Error("HTTP "+r.status+(m?" - "+m:"")+" ["+decodeURIComponent(path).slice(0,110)+"]")}
  return r.json();
 }
 async function batch(ranges){

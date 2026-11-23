@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="apple-touch-icon" href="apple-touch-icon.png"><title>Mis Finanzas</title>
+<style>
+:root{--bg:#f6f7f4;--card:#fff;--tx:#1d2b24;--mu:#6b7a72;--ac:#1f7a5a;--ac2:#e8f3ee;--bad:#c0392b;--wr:#d98a00;--bd:#e3e7e2}
+@media(prefers-color-scheme:dark){:root{--bg:#121815;--card:#1b2420;--tx:#e8efea;--mu:#93a39a;--ac:#4cc79a;--ac2:#1f3329;--bad:#ff7b6b;--wr:#f0b341;--bd:#2a3731}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 -apple-system,system-ui,sans-serif;padding:max(12px,env(safe-area-inset-top)) 14px calc(84px + env(safe-area-inset-bottom))}
+main{max-width:520px;margin:0 auto}h1{font-size:22px;margin:4px 0 14px}h2{font-size:13px;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd)}.row:last-child{border:0}
+.mu{color:var(--mu);font-size:13px}.big{font-size:30px;font-weight:700;color:var(--ac)}.bad{color:var(--bad)}.v{font-size:18px;font-weight:700}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.g2 .card{margin:0}
+.bar{height:8px;background:var(--ac2);border-radius:6px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--ac)}.bar.w i{background:var(--wr)}.bar.b i{background:var(--bad)}
+.tag{font-size:11px;padding:2px 7px;border-radius:8px;background:var(--ac2);color:var(--ac)}
+input,select,button{width:100%;font:inherit;padding:11px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);margin-bottom:8px}
+#mes{font-size:18px;font-weight:700;background:var(--card)}.pri{background:var(--ac);color:#fff;border:0;font-weight:700}.x{width:auto;border:0;background:none;margin:0;padding:4px 8px;color:var(--mu)}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--bd);display:none;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;color:var(--mu);padding:9px 2px;margin:0;border-radius:0;font-size:12px}nav button span{display:block;font-size:20px}nav button.on{color:var(--ac);font-weight:700}
+#msg{text-align:center;color:var(--mu);padding:6px}
+</style></head><body><main><div id="msg"></div><div id="app"></div></main><nav id="nav"></nav>
+<script>
+// ====== CONFIGURA ESTAS DOS LINEAS ======
+const CLIENT_ID = "477148601448-nbtg70m15ajaapt323cqjkp6thfqi7ht.apps.googleusercontent.com";   // termina en .apps.googleusercontent.com
+const SHEET_ID  = "https://docs.google.com/spreadsheets/d/1i55vusAQsI00Bo12o4q488QgH9GtdcxZnRz8LnYLDGE/edit"; // el texto largo entre /d/ y /edit en la URL del Sheet
+// ========================================
+const API="https://sheets.googleapis.com/v4/spreadsheets/"+SHEET_ID;
+const M=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+const $=n=>"$"+Number(n).toLocaleString("es-DO",{maximumFractionDigits:2});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const msg=document.getElementById("msg"),app=document.getElementById("app"),nav=document.getElementById("nav");
+let B=null,G=null,mes=String(new Date().getMonth()+1).padStart(2,"0"),tab="res",token=null,tc=null;
+const bar=p=>`<div class="bar ${p>1?"b":p>.8?"w":""}"><i style="width:${Math.min(100,p*100)}%"></i></div>`;
+const err=e=>{msg.textContent="Error: "+(e&&e.message||e);msg.className="bad"};
+const ok=()=>{msg.textContent="";msg.className=""};
+const num=v=>Number(v)||0, tx=v=>(v===""||v==="-"||v==null)?"":String(v);
+const cell=(a,r,k)=>{const v=(a[r]||[])[k];return v===undefined?"":v};
+
+// ---------- Google API ----------
+async function api(path,opt={}){
+ const r=await fetch(API+path,{...opt,headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"}});
+ if(r.status===401){token=null;login("Tu sesión caducó. Inicia sesión de nuevo.");throw new Error("Sesión caducada")}
+ if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error&&j.error.message||("HTTP "+r.status))}
+ return r.json();
+}
+async function batch(ranges){
+ const d=await api("/values:batchGet?valueRenderOption=UNFORMATTED_VALUE&"+ranges.map(r=>"ranges="+encodeURIComponent(r)).join("&"));
+ return d.valueRanges.map(v=>v.values||[]);
+}
+async function getBase(){
+ const R=await batch(["'Presupuesto'!C7:G14","'Presupuesto'!C25:S87","'Presupuesto'!M11:M12","'Presupuesto'!S7:S8","'Deudas'!C8:G13","'Deudas'!C22:F28","'Deudas'!D8:D13",
+  "'Metas de Ahorro'!C8","'Metas de Ahorro'!C13:Q13","'Metas de Ahorro'!C22:Q22","'Metas de Ahorro'!E16:Q19","'Mis Finanzas'!C7","'Mis Finanzas'!H7","'Mis Finanzas'!M7","'No borrar'!A2:A13"]);
+ const ingresos=[];R[0].forEach(r=>{if(tx(r[0])&&num(r[4])>0)ingresos.push({n:r[0],tipo:tx(r[1]),m:num(r[4])})});
+ const cats=[];
+ [25,41,57,73].forEach(f=>[[0,4],[6,10],[12,16]].forEach(c=>{
+  const titulo=tx(cell(R[1],f-25,c[0]));if(!titulo)return;const items=[];
+  for(let i=1;i<=12;i++){const n=tx(cell(R[1],f-25+i,c[0])),m=num(cell(R[1],f-25+i,c[1]));if(n&&m>0)items.push({n,m})}
+  cats.push({k:titulo,items,total:items.reduce((a,x)=>a+x.m,0)});}));
+ const tarjetas=[];R[4].forEach(r=>{if(tx(r[0])||tx(r[1]))tarjetas.push({n:(tx(r[0])+" "+tx(r[1])).trim(),tasa:num(r[2]),saldo:num(r[3]),linea:num(r[4])})});
+ const creditos=[];R[5].forEach(r=>{if(tx(r[0]))creditos.push({n:r[0],inicial:num(r[1]),actual:num(r[2]),mensualidad:tx(r[3])})});
+ const metas=[0,4,8,12].map(o=>({n:tx(cell(R[8],0,o)),mensual:num(cell(R[9],0,o)),actual:num(cell(R[10],0,o)),meses:num(cell(R[10],1,o)),objetivo:num(cell(R[10],3,o))}));
+ return {ingresos,cats,tarjetas,creditos,metas,totalIngresos:num(cell(R[11],0,0)),totalGastos:num(cell(R[12],0,0)),disponible:num(cell(R[13],0,0)),
+  fijos:num(cell(R[2],0,0)),variables:num(cell(R[2],1,0)),hormigaMes:num(cell(R[3],0,0)),hormigaDia:num(cell(R[3],1,0)),metaMensual:num(cell(R[7],0,0)),
+  categorias:R[14].flat().filter(x=>x!==""&&x!=null).map(String),nombresTarjetas:R[6].flat().filter(x=>x!==""&&x!=null).map(String)};
+}
+async function getMes(m){
+ const s="'"+m+"'!",R=await batch([s+"B9:F72",s+"H9:I20",s+"H4",s+"K4",s+"N4"]);
+ const gastos=[];R[0].forEach((r,i)=>{if(r&&r[2]!==undefined&&r[2]!=="")gastos.push({fila:i+9,c:tx(r[0]),k:tx(r[1]),m:num(r[2]),p:tx(r[3]),t:tx(r[4])})});
+ return {gastos,cats:R[1].map(r=>({k:tx(r[0]),m:num(r[1])})),presupuesto:num(cell(R[2],0,0)),gasto:num(cell(R[3],0,0)),disponible:num(cell(R[4],0,0))};
+}
+const rng=(m,f)=>encodeURIComponent("'"+m+"'!B"+f+":F"+f);
+async function add(){
+ const m=parseFloat(document.getElementById("fm").value);if(!m||m<=0){msg.textContent="Escribe un monto válido";return}
+ const g=[fc.value.trim()||"Gasto",fk.value,m,fp.value,ft.value];
+ document.getElementById("btn").disabled=true;msg.textContent="Guardando…";
+ try{const d=await getMes(mes);let f=9;while(f<=72&&d.gastos.some(x=>x.fila===f))f++;
+  if(f>72)throw new Error("La hoja "+mes+" está llena");
+  await api("/values/"+rng(mes,f)+"?valueInputOption=USER_ENTERED",{method:"PUT",body:JSON.stringify({values:[g]})});
+  G=await getMes(mes);ok();render();}catch(e){err(e);render()}
+}
+async function del(f){if(!confirm("¿Borrar este gasto?"))return;msg.textContent="Borrando…";
+ try{await api("/values/"+rng(mes,f)+":clear",{method:"POST",body:"{}"});G=await getMes(mes);ok();render()}catch(e){err(e)}}
+async function setMes(m){mes=m;msg.textContent="Cargando…";try{G=await getMes(m);ok();render()}catch(e){err(e)}}
+
+// ---------- Sesión ----------
+function login(texto){
+ nav.style.display="none";
+ app.innerHTML=`<h1>Mis Finanzas</h1><div class="card"><p>${texto||"Inicia sesión con la cuenta de Google dueña de tu Sheet."}</p><button class="pri" onclick="tc.requestAccessToken()">Iniciar sesión con Google</button></div>`;
+}
+function initAuth(){
+ if(CLIENT_ID.startsWith("PEGA")||SHEET_ID.startsWith("PEGA")){err("Falta configurar CLIENT_ID y SHEET_ID al inicio del archivo");return}
+ tc=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:"https://www.googleapis.com/auth/spreadsheets",
+  callback:r=>{if(r.error){err(r.error);return}token=r.access_token;start()},error_callback:e=>err(e.type||e)});
+ login();
+}
+async function start(){msg.textContent="Cargando…";try{[B,G]=await Promise.all([getBase(),getMes(mes)]);ok();nav.style.display="flex";render()}catch(e){err(e)}}
+
+// ---------- Pantallas ----------
+function resumen(){
+ const dT=B.tarjetas.reduce((a,t)=>a+t.saldo,0)+B.creditos.reduce((a,c)=>a+c.actual,0);
+ return `<h1>Mis Finanzas</h1>
+ <div class="card"><div class="mu">Disponible al final de mes</div><div class="big ${B.disponible<0?"bad":""}">${$(B.disponible)}</div><div class="mu">Ingresos ${$(B.totalIngresos)} − gastos ${$(B.totalGastos)}</div></div>
+ <div class="g2"><div class="card"><div class="mu">Gastos fijos</div><div class="v">${$(B.fijos)}</div></div><div class="card"><div class="mu">Gastos variables</div><div class="v">${$(B.variables)}</div></div></div>
+ <h2>${M[+mes-1]}</h2><div class="card"><div class="row"><span>Presupuesto</span><b>${$(G.presupuesto)}</b></div><div class="row"><span>Gastado</span><b>${$(G.gasto)}</b></div>
+ <div class="row"><span>Restante</span><b class="${G.disponible<0?"bad":""}">${$(G.disponible)}</b></div>${bar(G.gasto/(G.presupuesto||1))}</div>
+ <h2>Metas de ahorro</h2><div class="card">${B.metas.filter(m=>m.mensual>0||m.objetivo>0).map(m=>`<div class="row"><div>${esc(m.n)}<div class="mu">Meta ${$(m.objetivo)} · ${m.meses} meses</div></div><b>${$(m.mensual)}/mes</b></div>`).join("")||'<div class="mu">Sin metas</div>'}
+ <div class="mu" style="margin-top:6px">Total ${$(B.metaMensual)}/mes · ${(B.metaMensual/(B.totalIngresos||1)*100).toFixed(0)}% de tus ingresos</div></div>
+ <h2>Gastos hormiga 🐜</h2><div class="card"><div class="row"><span>Presupuesto al mes</span><b>${$(B.hormigaMes)}</b></div><div class="row"><span>Máximo por día</span><b>${$(B.hormigaDia)}</b></div></div>
+ <h2>Deudas</h2><div class="card"><div class="row"><span>Deuda total</span><b class="bad">${$(dT)}</b></div></div>`;
+}
+function gastos(){
+ const mn=M[+mes-1];
+ return `<select id="mes" onchange="setMes(this.value)">${M.map((n,i)=>{const v=String(i+1).padStart(2,"0");return `<option value="${v}" ${v===mes?"selected":""}>${n}</option>`}).join("")}</select>
+ <div class="card"><div class="mu">Disponible del mes</div><div class="big ${G.disponible<0?"bad":""}">${$(G.disponible)}</div>${bar(G.gasto/(G.presupuesto||1))}
+ <div class="mu" style="margin-top:6px">Presupuesto ${$(G.presupuesto)} · Gastado ${$(G.gasto)}</div></div>
+ <h2>Nuevo gasto en ${mn}</h2><div class="card"><input id="fc" placeholder="Concepto"><input id="fm" type="number" inputmode="decimal" placeholder="Monto">
+ <select id="fk">${B.categorias.map(c=>`<option>${esc(c)}</option>`).join("")}</select><select id="fp"><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option></select>
+ <select id="ft"><option value="">Tarjeta (si aplica)</option>${B.nombresTarjetas.map(c=>`<option>${esc(c)}</option>`).join("")}</select>
+ <button class="pri" id="btn" onclick="add()">Agregar al sheet</button></div>
+ <h2>Gastos de ${mn} (${G.gastos.length})</h2><div class="card">${G.gastos.length?G.gastos.slice().reverse().map(g=>`<div class="row"><div><div>${esc(g.c)}</div><div class="mu">${esc(g.k)} · ${esc(g.p)}${g.t?" · "+esc(g.t):""}</div></div><div><b>${$(g.m)}</b><button class="x" onclick="del(${g.fila})">✕</button></div></div>`).join(""):'<div class="mu">Sin gastos este mes.</div>'}</div>
+ <h2>Por categoría</h2><div class="card">${G.cats.filter(c=>c.m>0).map(c=>`<div class="row"><span>${esc(c.k)}</span><b>${$(c.m)}</b></div>`).join("")||'<div class="mu">—</div>'}</div>`;
+}
+function presu(){
+ return `<h1>Presupuesto</h1><h2>Ingresos</h2><div class="card">${B.ingresos.map(i=>`<div class="row"><span>${esc(i.n)} <span class="tag">${esc(i.tipo)}</span></span><b>${$(i.m)}</b></div>`).join("")}<div class="row"><b>Total</b><b>${$(B.totalIngresos)}</b></div></div>
+ <h2>Gastos mensuales</h2>${B.cats.filter(c=>c.total>0).map(c=>`<div class="card"><div class="row" style="padding-top:0"><b>${esc(c.k)}</b><b>${$(c.total)}</b></div>
+ ${c.items.map(i=>`<div class="row"><span class="mu">${esc(i.n)}</span><span class="mu">${$(i.m)}</span></div>`).join("")}${bar(c.total/(B.totalGastos||1))}<div class="mu">${(c.total/(B.totalGastos||1)*100).toFixed(0)}% de tus gastos</div></div>`).join("")}
+ <div class="card"><div class="row"><b>Total gastos</b><b>${$(B.totalGastos)}</b></div><div class="row"><span>Anual estimado</span><span>${$(B.totalGastos*12)}</span></div></div>`;
+}
+function deudas(){
+ const tl=B.tarjetas.reduce((a,t)=>a+t.linea,0),ts=B.tarjetas.reduce((a,t)=>a+t.saldo,0),cr=B.creditos.reduce((a,c)=>a+c.actual,0);
+ return `<h1>Deudas</h1><div class="card"><div class="mu">Deuda total</div><div class="big bad">${$(ts+cr)}</div><div class="mu">Tarjetas ${$(ts)} · Créditos ${$(cr)}</div></div>
+ <h2>Tarjetas · uso ${(ts/(tl||1)*100).toFixed(0)}%</h2>${B.tarjetas.map(t=>{const u=t.saldo/(t.linea||1);return `<div class="card"><div class="row" style="padding-top:0"><b>${esc(t.n)}</b><b class="${u>1?"bad":""}">${$(t.saldo)}</b></div>
+ <div class="mu">Línea ${$(t.linea)} · Tasa ~${(t.tasa*100).toFixed(0)}% · Uso ${(u*100).toFixed(0)}%${u>1?" ⚠️ excedida":""}</div>${bar(u)}</div>`}).join("")}
+ <h2>Créditos</h2>${B.creditos.map(c=>`<div class="card"><div class="row" style="padding-top:0"><b>${esc(c.n)}</b><b>${$(c.actual)}</b></div><div class="mu">Inicial ${$(c.inicial)}${c.mensualidad?" · Mensualidad "+esc(c.mensualidad):""} · ${(100-c.actual/(c.inicial||1)*100).toFixed(0)}% pagado</div></div>`).join("")}`;
+}
+const T=[["res","🏠","Resumen",resumen],["gas","🧾","Gastos",gastos],["pre","📊","Presupuesto",presu],["deu","💳","Deudas",deudas]];
+function render(){
+ app.innerHTML=T.find(t=>t[0]===tab)[3]();
+ nav.innerHTML=T.map(t=>`<button class="${t[0]===tab?"on":""}" onclick="tab='${t[0]}';render();scrollTo(0,0)"><span>${t[1]}</span>${t[2]}</button>`).join("");
+}
+</script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="initAuth()"></script>
+</body></html>
